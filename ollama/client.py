@@ -21,12 +21,15 @@ PULL_PATH: str = "/api/pull"
 
 StringCallback = Callable[[str], None]
 
+
 class ChatMessage(TypedDict):
     role: str
     content: str
 
+
 def base_url(port: int, host: str = DEFAULT_HOST) -> str:
     return f"http://{host}:{port}"
+
 
 def stream_chat(
     port: int,
@@ -54,19 +57,18 @@ def list_models(port: int) -> list[str] | Error:
         return Error(message=str(exc))
     return _model_names_helper(payload=payload)
 
+
 def has_model(port: int, model: str) -> bool | Error:
     names: list[str] | Error = list_models(port=port)
     if isinstance(names, Error):
         return names
     return any(_matches_helper(name=name, target=model) for name in names)
 
-def pull(
-    port: int,
-    model: str,
-    on_status: StringCallback | None = None,
-) -> Error | None:
-    payload: dict[str, Any] = {"name": model, "stream": True}
+
+def pull(port, model, on_status=None):
+    payload = {"model": model, "name": model, "stream": True}
     return _stream_pull_helper(port=port, payload=payload, on_status=on_status)
+
 
 def _chat_payload_helper(
     model: str,
@@ -80,6 +82,7 @@ def _chat_payload_helper(
     if num_ctx:
         payload["options"] = {"num_ctx": int(num_ctx)}
     return payload
+
 
 def _post_chat_helper(
     port: int,
@@ -102,6 +105,7 @@ def _open_chat_helper(port: int, payload: dict[str, Any]) -> requests.Response |
         return requests.post(url, json=payload, stream=True, timeout=CHAT_TIMEOUT_SECONDS)
     except requests.RequestException as exc:
         return Error(message=str(exc))
+
 
 def _consume_chat_stream_helper(
     response: requests.Response,
@@ -130,6 +134,7 @@ def _consume_chat(
         )
     return "".join(collected)
 
+
 def _chat_chunks_helper(
     response: requests.Response,
     stop_event: threading.Event | None,
@@ -141,11 +146,13 @@ def _chat_chunks_helper(
         if data.get("done"):
             return
 
+
 def _iter_parsed_helper(lines: Iterable[bytes]) -> Iterator[dict[str, Any]]:
     for line in lines:
         data: dict[str, Any] | None = _parse_json_helper(line=line)
         if data is not None:
             yield data
+
 
 def _handle_chunk_helper(
     data: dict[str, Any],
@@ -157,6 +164,7 @@ def _handle_chunk_helper(
     _emit_helper(callback=on_thinking, value=message.get("thinking"))
     _collect_helper(content=message.get("content"), collected=collected, on_token=on_token)
 
+
 def _collect_helper(
     content: str | None,
     collected: list[str],
@@ -167,9 +175,11 @@ def _collect_helper(
     collected.append(content)
     _emit_helper(callback=on_token, value=content)
 
+
 def _emit_helper(callback: StringCallback | None, value: str | None) -> None:
     if value and callback:
         callback(value)
+
 
 def _parse_json_helper(line: bytes) -> dict[str, Any] | None:
     try:
@@ -177,15 +187,19 @@ def _parse_json_helper(line: bytes) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
 
+
 def _matches_helper(name: str, target: str) -> bool:
     return name == target or name.startswith(f"{target}:")
+
 
 def _get_json_helper(port: int, path: str) -> dict[str, Any]:
     url: str = f"{base_url(port)}{path}"
     return requests.get(url, timeout=LIST_MODELS_TIMEOUT_SECONDS).json()
 
+
 def _model_names_helper(payload: dict[str, Any]) -> list[str]:
     return [model["name"] for model in payload.get("models", [])]
+
 
 def _stream_pull_helper(
     port: int,
@@ -198,6 +212,7 @@ def _stream_pull_helper(
         return Error(message=str(exc))
     return None
 
+
 def _consume_pull_stream_helper(
     port: int,
     payload: dict[str, Any],
@@ -208,13 +223,20 @@ def _consume_pull_stream_helper(
         response.raise_for_status()
         _consume_pull(response=response, on_status=on_status)
 
-def _consume_pull(
-    response: requests.Response,
-    on_status: StringCallback | None,
-) -> None:
+
+def _consume_pull(response, on_status):
     seen: set[str] = set()
     for line in response.iter_lines():
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if data.get("error"):
+            raise requests.RequestException(data["error"])
         _handle_status_line_helper(line=line, seen=seen, on_status=on_status)
+
 
 def _handle_status_line_helper(
     line: bytes,
@@ -225,6 +247,7 @@ def _handle_status_line_helper(
     if status and status not in seen:
         seen.add(status)
         _emit_helper(callback=on_status, value=status)
+
 
 def _parse_status_helper(line: bytes) -> str:
     try:
