@@ -17,6 +17,7 @@ from . import chat_panel, greeter, session_panel, widgets
 DEFAULT_OLLAMA_PORT: int = 11434
 OLLAMA_BOOT_TIMEOUT_SECONDS: float = 30.0
 
+
 class MainWindow:
     
     def __init__(self, root: tk.Tk) -> None:
@@ -38,10 +39,19 @@ class MainWindow:
         self._build_toolbar()
         self._build_container()
         self._boot_ollama()
-        self._detect()
         self._show_greeter()
+        self._greeter.set_status("Preparing models...")
+        threading.Thread(target=self._ensure_models_worker, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
 
+    def _ensure_models_worker(self) -> None:
+        port = controller.detect_port()
+        err = controller.ensure_models(
+            port=port,
+            on_status=lambda s: self.root.after(0, self._set_greeter_status, s),
+        ) if port else Error(message="Ollama not running")
+        self.root.after(0, self._models_ready, err)
+    
     def _configure_root(self) -> None:
         self.root.title("LocalGPT")
         self.root.geometry("900x680")
@@ -64,9 +74,17 @@ class MainWindow:
     def _boot_ollama(self) -> None:
         if server.is_running():
             return
-        self._ollama_proc = server.start(port=DEFAULT_OLLAMA_PORT)
+        try:
+            self._ollama_proc = server.start(port=DEFAULT_OLLAMA_PORT)
+        except OSError:
+            self._ollama_proc = None
+            messagebox.showerror(
+                "Ollama not found",
+                "Ollama is not installed. Install it from https://ollama.com and restart LocalGPT.",
+            )
+            return
         server.wait_until_ready(port=DEFAULT_OLLAMA_PORT, timeout=OLLAMA_BOOT_TIMEOUT_SECONDS)
-
+    
     def _detect(self) -> None:
         self.port = controller.detect_port()
         self.model = controller.default_model(self.port) if self.port else ""
@@ -82,6 +100,9 @@ class MainWindow:
         self._greeter.set_status(self._status_text())
 
     def _show_chat(self) -> None:
+        if not self.model:
+            messagebox.showinfo("Please wait", "Models are still being prepared (or Ollama is unavailable).")
+            return
         self._build_chat_view()
         self._open_current_session()
         self._apply_chat_header()
@@ -104,6 +125,7 @@ class MainWindow:
         assert self._sessions is not None
         self._sessions.reload()
         self._activate_picked_session()
+
 
     def _activate_picked_session(self) -> None:
         session_id: str | None = self._pick_active_session_id()
@@ -219,6 +241,7 @@ class MainWindow:
         if self._stop_event is not None:
             self._stop_event.set()
 
+
     def _emit(self, token: str) -> None:
         self._response_buffer.append(token)
         self.root.after(0, self._chat.append_token, token)
@@ -308,6 +331,10 @@ class MainWindow:
         for msg in session.messages:
             self._chat.append_user(msg["content"]) if msg["role"] == "user" else self._chat.append_system(msg["content"])
 
+    
+    def _set_greeter_status(self, text: str) -> None:
+        if self._greeter is not None:
+            self._greeter.set_status(text)
             
     def _pick_active_session_id(self) -> str | None:
         assert self._sessions is not None
@@ -338,3 +365,8 @@ class MainWindow:
         )
         if isinstance(result, Error):
             print(f"[session] failed to persist modes: {result}")
+            
+    def _models_ready(self, err) -> None:
+        self._detect()
+        if self._greeter is not None:
+            self._greeter.set_status(str(err) if err else self._status_text())
