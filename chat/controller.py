@@ -12,8 +12,11 @@ PREFERRED_CHAT_MODELS: tuple[str, ...] = (
     "llama3.1", "llama3.2", "llama3", "mistral", "qwen2.5", "deepseek-r1",
 )
 
+REQUIRED_CHAT_MODEL: str = "deepseek-r1:7b"
+REQUIRED_EMBED_MODEL: str = "nomic-embed-text"
+
 SYSTEM_PROMPT: str = (
-    "You are WebGPT, an intelligent assistant specialized in procurement, data analysis, "
+    "You are LocalGPT, an intelligent local assistant specialized in procurement, data analysis, "
     "and contract evaluation, equipped with long-term memory and access to a verified local knowledge base.\n\n"
     "Guidelines:\n"
     "1. When reference material from the knowledge base or past conversation memory is provided, "
@@ -22,11 +25,27 @@ SYSTEM_PROMPT: str = (
     "2. If reference material is available, cite or reference the relevant source or session when helpful.\n"
     "3. Maintain conversation continuity and remember context across turns.\n"
     "4. If the requested information is not in the reference material or conversation history, state what is known "
-    "and reason based on general knowledge without inventing facts."
+    "and reason based on general knowledge without inventing facts.\n"
+    "5. Keep it simple and speak in portuguese."
 )
+
+def ensure_models(port: int, on_status=None) -> Error | None:
+    for model in (REQUIRED_CHAT_MODEL, REQUIRED_EMBED_MODEL):
+        present = client.has_model(port=port, model=model)
+        if isinstance(present, Error):
+            return present
+        if present:
+            continue
+        if on_status:
+            on_status(f"Downloading {model}...")
+        result = client.pull(port=port, model=model, on_status=on_status)
+        if isinstance(result, Error):
+            return result
+    return None
 
 def detect_port() -> int | None:
     return ports.find_ollama()
+
 
 def default_model(port: int | None) -> str:
     if port is None:
@@ -36,22 +55,30 @@ def default_model(port: int | None) -> str:
         return ""
     return _pick_chat_model_helper(installed=installed)
 
+
 def _pick_chat_model_helper(installed: list[str]) -> str:
     chat: list[str] = [name for name in installed if not _is_embedding_helper(name=name)]
     if not chat:
         return ""
     return _preferred_or_first_helper(candidates=chat)
 
+
 def _is_embedding_helper(name: str) -> bool:
     lowered: str = name.lower()
     return any(keyword in lowered for keyword in EMBED_MODEL_KEYWORDS)
 
+
 def _preferred_or_first_helper(candidates: list[str]) -> str:
+    for name in candidates:
+        if name == REQUIRED_CHAT_MODEL:
+            return name
+        
     for preferred in PREFERRED_CHAT_MODELS:
         for name in candidates:
             if name.startswith(preferred):
                 return name
     return candidates[0]
+
 
 def _contextual_query_helper(prompt: str, history: list[dict[str, str]] | None) -> str:
     if not history:
@@ -69,6 +96,7 @@ def _contextual_query_helper(prompt: str, history: list[dict[str, str]] | None) 
         return f"{prompt} {' '.join(missing_ids)}"
     return prompt
 
+
 def send(
     root: Any,
     port: int,
@@ -82,20 +110,22 @@ def send(
     stop_event=None,
     history: list[dict[str, str]] | None = None,
 ) -> None:
+    tokenless: bool = "tokenless" in modes
+    effective_history: list[dict[str, str]] = [] if tokenless else (history or [])
+
     augmented: str = _augment_helper(prompt=prompt, attachments=attachments, modes=modes)
-    search_query = _contextual_query_helper(prompt=prompt, history=history)
+    search_query = _contextual_query_helper(prompt=prompt, history=effective_history)
     chunks = retrieve(search_query, port=port)
     context = format_context(chunks)
     if context:
         augmented = f"{context}\n\n{augmented}"
 
     messages: list[client.ChatMessage] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    if history:
-        for msg in history:
-            role = msg.get("role")
-            content = msg.get("content")
-            if role in ("user", "assistant") and content:
-                messages.append({"role": role, "content": content})
+    for msg in effective_history:
+        role = msg.get("role")
+        content = msg.get("content")
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
 
     messages.append({"role": "user", "content": augmented})
 
