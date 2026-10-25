@@ -1,5 +1,7 @@
 TOKENLESS = "tokenless"
 DEEPTHINK = "deepthink"
+COT = "cot"
+TOT = "tot"
 
-ALL = (TOKENLESS, DEEPTHINK)
+ALL = (TOKENLESS, DEEPTHINK, COT, TOT)
 DEFAULT = DEEPTHINK
