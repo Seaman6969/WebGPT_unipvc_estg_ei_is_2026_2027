@@ -3,6 +3,7 @@ from typing import Any
 
 from ollama import client, ports
 from utils.errors import Error
+from config.reasoning_settings import ReasoningSettings, load_reasoning_settings
 from rag import format_context, retrieve
 
 EMBED_MODEL_KEYWORDS: tuple[str, ...] = (
@@ -29,6 +30,7 @@ SYSTEM_PROMPT: str = (
     "5. Keep it simple and speak in portuguese."
 )
 
+
 def ensure_models(port: int, on_status=None) -> Error | None:
     for model in (REQUIRED_CHAT_MODEL, REQUIRED_EMBED_MODEL):
         present = client.has_model(port=port, model=model)
@@ -42,6 +44,7 @@ def ensure_models(port: int, on_status=None) -> Error | None:
         if isinstance(result, Error):
             return result
     return None
+
 
 def detect_port() -> int | None:
     return ports.find_ollama()
@@ -72,7 +75,7 @@ def _preferred_or_first_helper(candidates: list[str]) -> str:
     for name in candidates:
         if name == REQUIRED_CHAT_MODEL:
             return name
-        
+
     for preferred in PREFERRED_CHAT_MODELS:
         for name in candidates:
             if name.startswith(preferred):
@@ -97,6 +100,17 @@ def _contextual_query_helper(prompt: str, history: list[dict[str, str]] | None) 
     return prompt
 
 
+def _settings_for_modes(modes: set[str]) -> ReasoningSettings:
+    base = load_reasoning_settings()
+    return ReasoningSettings(
+        use_cot="cot" in modes,
+        use_tot="tot" in modes,
+        tot_breadth=base.tot_breadth,
+        cot_max_subqueries=base.cot_max_subqueries,
+        reasoning_model=base.reasoning_model,
+    )
+
+
 def send(
     root: Any,
     port: int,
@@ -115,7 +129,8 @@ def send(
 
     augmented: str = _augment_helper(prompt=prompt, attachments=attachments, modes=modes)
     search_query = _contextual_query_helper(prompt=prompt, history=effective_history)
-    chunks = retrieve(search_query, port=port)
+    settings = _settings_for_modes(modes)
+    chunks = retrieve(search_query, port=port, settings=settings)
     context = format_context(chunks)
     if context:
         augmented = f"{context}\n\n{augmented}"
@@ -137,6 +152,7 @@ def send(
         stop_event=stop_event,
     )
     on_done(result)
+
 
 def _augment_helper(
     prompt: str,
