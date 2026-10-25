@@ -1,5 +1,3 @@
-
-
 const state = {
   currentSessionId: null,
   sessions: [],
@@ -38,6 +36,8 @@ const dom = {
   
   modeDeepthink: document.getElementById('modeDeepthink'),
   modeTokenless: document.getElementById('modeTokenless'),
+  modeCot: document.getElementById('modeCot'),
+  modeTot: document.getElementById('modeTot'),
 
   
   messagesContainer: document.getElementById('messagesContainer'),
@@ -355,6 +355,8 @@ async function selectSession(sessionId) {
     const modes = data.modes || ['deepthink'];
     dom.modeDeepthink.checked = modes.includes('deepthink');
     dom.modeTokenless.checked = modes.includes('tokenless');
+    dom.modeCot.checked = modes.includes('cot');
+    dom.modeTot.checked = modes.includes('tot');
 
     renderMessages(data.messages || []);
   } catch (err) {
@@ -431,6 +433,8 @@ async function updateSessionModes() {
   const modes = [];
   if (dom.modeDeepthink.checked) modes.push('deepthink');
   if (dom.modeTokenless.checked) modes.push('tokenless');
+  if (dom.modeCot.checked) modes.push('cot');
+  if (dom.modeTot.checked) modes.push('tot');
 
   try {
     await fetch(`/api/sessions/${state.currentSessionId}`, {
@@ -570,6 +574,8 @@ async function handleSendMessage() {
   const modes = [];
   if (dom.modeDeepthink.checked) modes.push('deepthink');
   if (dom.modeTokenless.checked) modes.push('tokenless');
+  if (dom.modeCot.checked) modes.push('cot');
+  if (dom.modeTot.checked) modes.push('tot');
 
   
   setStreamingState(true);
@@ -1015,6 +1021,8 @@ function setupEventListeners() {
   
   dom.modeDeepthink.addEventListener('change', updateSessionModes);
   dom.modeTokenless.addEventListener('change', updateSessionModes);
+  dom.modeCot.addEventListener('change', updateSessionModes);
+  dom.modeTot.addEventListener('change', updateSessionModes);
 
   
   dom.modelSelect.addEventListener('change', async (e) => {
